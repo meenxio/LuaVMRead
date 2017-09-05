@@ -1,7 +1,15 @@
 词法分析模块 llex.h .c
 语法分析模块 lparser.h .c
 指令生成模块 lcode.h .c
+Lua并没有使用llex和yacc，而是使用完全手写的词法和语法分析器。使用手写分析器的原因首先是考虑到效率。
+并且yacc/bison本身生成的代码在可移植性上有一些问题，无发达到Lua高可移植性的设计目标。还有就是手写分析器可以在C stack上面分配编译过程中需要的数据对象，这个我们后面会讲到。
+对于一个chunk，Lua在对其分析的过程中直接生成最终的指令，没有多余的对源代码或语法结构的遍历。也就是说Lua对源代码进行一次遍历就生成最终结果。
 
+语法分析器是整个编译过程的驱动器。通过对luaY_parser函数的调用，启动整个编译过程。语法分析采用“递归下降”的方法，从词法分析器中读取下一个token，然后根据这个token和lua的语法规则，将高层的语法规则分解成底层的语法规则，进一步进行分析。根据语法，“递归”在lua语法中只出现在两个地方，一个是statement函数，一个是subexpr函数。这也就是在这两个函数中调用enterlevel和leaveleavel，对当前调用深度进行检测的原因。如果递归太深，编译会报错。在分析的过程中，词法分析器会调用指令生成器，直接生成最终的指令。
+从宏观上讲，整个编译过程就是生成proto tree的过程。语法分析器从mainfunc出发，开始分析和生成mainfunc的proto。在生成一个proto的过程中，生成的指令直接保存到proto的指令列表中。当遇到function statement或者local function statement时，首先生成子函数的proto，然后回来继续。通过这样的遍历方式，最终构建出一个proto tree。
+在编译过程中，使用FuncState结构体来保存一个函数编译的状态数据。每个FuncState都有一个prev变量用来引用外围函数的FuncState，使当前所有没有分析完成的FuncState形成一个栈结构。栈底是mainfunc的FuncState，栈顶是当前正在分析的FuncState。每当开始分析一个新的函数时，会创建一个新的FuncState与之对应，将当前的FuncState保存在新的FuncState的prev中，并将当前的FuncState指向新的FuncState，这相当于压栈(open_func)。等待这个新函数分析完成后，当前的FuncState就没用了，将当前的FuncState恢复成原来的FuncState，这相当于弹栈(close_func)。
+Dyndata是一个全局数据，他本身也是一个栈。对应上面的FuncState栈，Dyndata保存了每个FuncState对应的局部变量描述列表，goto列表和label列表。这些数据会跟着当前FuncState进行压栈和弹栈。
+前面说过，整个编译系统的全局状态都保存在LexState中。LexState中与全局状态相关的主要是两个变量。fs指向当前正在编译的函数的FuncState。而dyd则指向全局的Dyndata数
 General
 -------------------------------------------------------
 - luaK_code... returns the "pc" of the instruction just being generated.
