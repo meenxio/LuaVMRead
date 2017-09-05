@@ -1,4 +1,11 @@
-
+luaV_execute(){
+     reentry:
+     while(读取指令){
+          OP_XXX:do_XXX;
+          OP_CALL：保存当前现场，将被调用的函数(闭包)加载，然后goto reentry, 继续while循环执行指令；
+          OP_RETURN：恢复上层调用相关现场，然后goto reentry，继续while循环执行调用的下一条指令；
+     }
+}
 
 lua_settop(lua_State *L, int idx)
 
