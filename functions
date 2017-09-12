@@ -1,0 +1,69 @@
+1. luaL_newlib 被定义为宏，完成功能很简单。首先创建一个 table，然后把成员函数名做 key，成员函数作为 value 放入该 table 中. over
+
+String Lib 加载部分
+-----------------------------
+以 string lib 为例，加载代码如下：
+LUAMOD_API int luaopen_string (lua_State *L) {
+  luaL_newlib(L, strlib);
+  createmetatable(L);
+  return 1;
+}
+
+函数主要有 2 行，luaL_newlib 和 createmetatable 两个函数调用。
+
+luaL_newlib 被定义为宏，完成功能很简单。首先创建一个 table，然后把成员函数名做 key，成员函数作为 value 放入该 table 中，over。
+#define luaL_newlibtable(L,l)   \
+  lua_createtable(L, 0, sizeof(l)/sizeof((l)[0]) - 1)
+  
+#define luaL_newlib(L,l)    (luaL_newlibtable(L,l), luaL_setfuncs(L,l,0))
+
+
+luaL_newlib，L-top - 1 即为刚才创建的 table，结果大概像下面这样：
+strlib = {"byte"=str_byte, "gmatch"=gmatch, ...}
+
+
+createmetatable 函数：
+static void createmetatable (lua_State *L) {
+  lua_createtable(L, 0, 1);  /* table to be metatable for strings */
+  lua_pushliteral(L, "");  /* dummy string */
+  lua_pushvalue(L, -2);  /* copy table */
+  lua_setmetatable(L, -2);  /* set table as metatable for strings */
+  lua_pop(L, 1);  /* pop dummy string */
+  lua_pushvalue(L, -2);  /* get string library */
+  lua_setfield(L, -2, "__index");  /* metatable.__index = string */
+  lua_pop(L, 1);  /* pop metatable */
+}
+
+看起来很复杂，其实都是栈操作，真正做的事很少。
+首先，创建一个 table(假定名字为 meta_table)，然后挂接到全局 meata table 映射表(G(L)->mt)里面，key 为类型名，这里是 string 类型的 int 值；挂接动作是在 lua_setmetatable 函数里面完成：
+G(L)->mt[ttypenv(obj)] = mt; /* mt 即为创建的 meta table，obj 空字符串，详细看代码*/
+
+然后，然后设置 meta_table 的 __index 属性为刚才创建的 strlib，大概像这样：
+meta_table["__index"] = strlib
+
+至此，strlib 加载完成，加载的结果，L->top -1 为一个 成员函数的 table。
+
+lib 的注册
+-------------
+最上层加载某一个库时，调用的函数是 luaL_requiref，如下：
+LUALIB_API void luaL_requiref (lua_State *L, const char *modname,
+                               lua_CFunction openf, int glb) {
+  lua_pushcfunction(L, openf);
+  lua_pushstring(L, modname);  /* argument to open function */
+  lua_call(L, 1, 1);  /* open module */
+  luaL_getsubtable(L, LUA_REGISTRYINDEX, "_LOADED");
+  lua_pushvalue(L, -2);  /* make copy of module (call result) */
+  lua_setfield(L, -2, modname);  /* _LOADED[modname] = module */
+  lua_pop(L, 1);  /* remove _LOADED table */
+  if (glb) {
+    lua_pushvalue(L, -1);  /* copy of 'mod' */
+    lua_setglobal(L, modname);  /* _G[modname] = module */
+  }
+}
+
+对于上面讲的 string lib 来讲，lua_call 调用的就是函数 luaopen_string，前两行为设置参数，具体调用细节不谈，调用的结果返回了一个 table。
+
+luaL_getsubtable(L, LUA_REGISTRYINDEX, "_LOADED") 
+_LOADED 对应一个 table，用来存储模块的加载结果。key 为模块名(对应刚才的为 string)，value 为成员函数的 table，luaL_getsubtable 后面2行就是干这事的。
+
+最后 3 行，如果是模块为全局作用域，再扔到注册表的全局变量中。
